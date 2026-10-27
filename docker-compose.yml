@@ -1,0 +1,44 @@
+# Local version of all three tiers + monitoring. `docker compose up --build`
+# then open http://localhost:8000 (app) and http://localhost:3000 (Grafana, admin/admin).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: chatops
+      POSTGRES_PASSWORD: chatops_local_only
+      POSTGRES_DB: chatops
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatops"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: ./app
+    environment:
+      DATABASE_URL: postgresql+psycopg://chatops:chatops_local_only@db:5432/chatops
+      LLM_PROVIDER: ${LLM_PROVIDER:-rule-based}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      INSTANCE_ID: local-compose
+    ports: ["8000:8000"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes: [./monitoring/prometheus/prometheus.local.yml:/etc/prometheus/prometheus.yml:ro]
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/provisioning/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  pgdata:

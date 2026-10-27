@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (gitignored) and edit.
+initial_image = "adisru/tritier-chatops:latest"
+alert_email   = "you@example.com"
+
+# "instance" (cheap, default) or "gateway" (managed). See docs/DESIGN.md.
+nat_mode = "instance"
+
+# Leave empty for HTTP only. Add an ACM cert ARN to enable HTTPS.
+certificate_arn = ""

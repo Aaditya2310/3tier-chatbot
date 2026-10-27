@@ -1,0 +1,90 @@
+# App pipeline: test -> build & push to Docker Hub -> roll the ASG.
+# Deploy = write the new image tag to SSM, then start an ASG instance refresh.
+# New instances read the tag at boot; the ALB only sends traffic once they pass /health.
+name: app
+
+on:
+  pull_request:
+    paths: ["app/**", ".github/workflows/app.yml"]
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/app.yml"]
+
+env:
+  AWS_REGION: ap-south-1
+  IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/tritier-chatops
+  ENV_NAME: dev
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: app } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+
+  build:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: true
+          # Immutable sha tag is what we deploy; :latest is only for convenience.
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE }}:latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production # requires reviewer approval if you enable protection rules
+    permissions:
+      id-token: write # OIDC: short-lived AWS credentials, no stored keys
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Point SSM at the new image
+        run: |
+          aws ssm put-parameter --name "/tritier/${ENV_NAME}/app/image" \
+            --value "${IMAGE}:${{ needs.build.outputs.tag }}" --type String --overwrite
+
+      - name: Rolling replace of app instances
+        run: |
+          ASG="tritier-${ENV_NAME}-app"
+          ID=$(aws autoscaling start-instance-refresh --auto-scaling-group-name "$ASG" \
+                 --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":180}' \
+                 --query InstanceRefreshId --output text)
+          echo "Instance refresh $ID started"
+          for i in $(seq 1 60); do
+            STATUS=$(aws autoscaling describe-instance-refreshes --auto-scaling-group-name "$ASG" \
+                       --instance-refresh-ids "$ID" --query 'InstanceRefreshes[0].Status' --output text)
+            echo "[$i] $STATUS"
+            case "$STATUS" in
+              Successful) exit 0 ;;
+              Failed|Cancelled|RollbackSuccessful|RollbackFailed) exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "Timed out waiting for instance refresh"; exit 1

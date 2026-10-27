@@ -1,0 +1,22 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+crash.log
+# Keep the lock file committed: it pins provider versions for CI
+!.terraform.lock.hcl
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+.venv/
+
+.env
+
+*.pem
+
+*.pem

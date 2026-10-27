@@ -1,0 +1,38 @@
+# Manual teardown — ALB, RDS and the NAT bill hourly, so destroy after each session.
+# Run from Actions tab -> destroy -> Run workflow -> type "destroy".
+name: destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to tear down the dev environment'
+        required: true
+
+env:
+  AWS_REGION: ap-south-1
+  TF_VAR_initial_image: ${{ vars.DOCKERHUB_USERNAME }}/tritier-chatops:latest
+
+concurrency:
+  group: terraform-dev
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    if: github.event.inputs.confirm == 'destroy'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    defaults: { run: { working-directory: terraform/envs/dev } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "~1.10" }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+      - run: terraform destroy -input=false -auto-approve -lock-timeout=5m

@@ -1,0 +1,9 @@
+# Only used on AWS. Auth comes from the monitoring instance's IAM role — no keys.
+apiVersion: 1
+datasources:
+  - name: CloudWatch
+    uid: cloudwatch
+    type: cloudwatch
+    jsonData:
+      authType: default
+      defaultRegion: ${region}
