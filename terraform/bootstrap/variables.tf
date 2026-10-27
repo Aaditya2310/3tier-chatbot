@@ -16,5 +16,5 @@ variable "github_owner" {
 
 variable "github_repo" {
   type    = string
-  default = "aws-3tier-chatbot-terraform"
+  default = "3tier-chatbot"
 }
