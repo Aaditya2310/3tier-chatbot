@@ -12,6 +12,8 @@ WORKDIR /app
 COPY --from=build /wheels /wheels
 RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 COPY src ./src
+# Readable by the non-root user regardless of how files arrived (scp from Windows creates 700 dirs)
+RUN chmod -R a+rX /app/src
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --retries=3 \
